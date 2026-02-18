@@ -41,6 +41,12 @@
         }
         .history-info div { font-size: 13px; font-weight: 600; text-transform: uppercase; }
         .history-info span { font-size: 10px; color: var(--text-dim); }
+        
+        /* Tombol Hapus */
+        .btn-delete {
+            background: rgba(255, 0, 51, 0.1); color: var(--neon-red); border: 1px solid var(--neon-red);
+            padding: 4px 8px; border-radius: 6px; font-size: 10px; cursor: pointer; margin-left: 10px;
+        }
 
         /* --- Modal --- */
         .modal-overlay {
@@ -84,32 +90,37 @@
         <div id="reader"></div>
         <div class="stats-grid">
             <div class="stat-card"><div class="stat-label">TOTAL</div><div class="stat-val" id="count-today">0</div></div>
-            <div class="stat-card"><div class="stat-label">STATUS</div><div class="stat-val" style="color:#00ff88; font-size:12px;">READY</div></div>
+            <div class="stat-card"><div class="stat-label">STATUS</div><div class="stat-val" id="status-text" style="color:#00ff88; font-size:12px;">READY</div></div>
+        </div>
+        
+        <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 12px; font-weight: 700;">RIWAYAT TERAKHIR</span>
+            <span onclick="clearAllHistory()" style="font-size: 10px; color: var(--neon-red); cursor: pointer;">HAPUS SEMUA</span>
         </div>
         <div id="history-list"></div>
     </div>
 
     <div class="modal-overlay" id="modal-overlay">
         <div class="modal" id="modal">
-            <h2>INPUT DATA</h2>
+            <h2>KONFIRMASI DATA</h2>
             <div class="input-group">
-                <label>KODE (AUTO)</label>
+                <label>KODE BARANG</label>
                 <input type="text" id="res-code" readonly>
             </div>
             <div class="input-group">
-                <label>NAMA BAG</label>
-                <input type="text" id="res-name" oninput="this.value = this.value.toUpperCase()">
+                <label>NAMA BAG / BARANG</label>
+                <input type="text" id="res-name" placeholder="CONTOH: TAS KULIT" oninput="this.value = this.value.toUpperCase()">
             </div>
             <div class="input-group">
-                <label>JUMLAH</label>
-                <input type="number" id="res-qty" value="0" onfocus="if(this.value=='0')this.value='';" onblur="if(this.value=='')this.value='0';">
+                <label>JUMLAH (QTY)</label>
+                <input type="number" id="res-qty" value="1" onfocus="if(this.value=='0')this.value='';" onblur="if(this.value=='')this.value='0';">
             </div>
-            <button class="btn-save" id="btn-save" onclick="saveData()">SIMPAN</button>
-            <button onclick="closeModal()" style="background:none; border:none; color:#555; width:100%; margin-top:10px; cursor:pointer; font-size:11px;">BATAL</button>
+            <button class="btn-save" id="btn-save" onclick="saveData()">SUBMIT DATA</button>
+            <button onclick="closeModal()" style="background:none; border:none; color:#555; width:100%; margin-top:10px; cursor:pointer; font-size:11px;">BATAL / SCAN ULANG</button>
         </div>
     </div>
 
-    <div id="toast">TERSIMPAN</div>
+    <div id="toast">DATA BERHASIL DISIMPAN</div>
     <audio id="beep" src="https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3"></audio>
 
     <script>
@@ -124,43 +135,114 @@
                 if (!isScanning) return;
                 isScanning = false;
                 document.getElementById('beep').play();
+                document.getElementById('status-text').innerText = "PAUSED";
+                document.getElementById('status-text').style.color = "#ffaa00";
+                
                 document.getElementById('res-code').value = txt.toUpperCase();
                 document.getElementById('modal-overlay').style.display = 'flex';
-            });
+            }).catch(err => console.error("Gagal start scanner", err));
         }
 
         async function saveData() {
-            const btn = document.getElementById('btn-save'), name = document.getElementById('res-name').value.toUpperCase(),
-                  qty = document.getElementById('res-qty').value, code = document.getElementById('res-code').value;
+            const btn = document.getElementById('btn-save');
+            const name = document.getElementById('res-name').value.trim().toUpperCase();
+            const qty = document.getElementById('res-qty').value;
+            const code = document.getElementById('res-code').value;
 
-            if (!name || qty <= 0) return alert("LENGKAPI DATA!");
+            if (!name || qty <= 0) return alert("NAMA DAN JUMLAH HARUS DIISI!");
             
-            btn.disabled = true; btn.innerText = "PROSES...";
+            btn.disabled = true; 
+            btn.innerText = "MENGIRIM...";
+            
             try {
-                await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({code, name, qty}) });
+                // Simulasi Post (Ganti mode ke 'cors' jika server mendukung, tetap 'no-cors' jika ke Google Sheets Apps Script standar)
+                await fetch(SCRIPT_URL, { 
+                    method: 'POST', 
+                    mode: 'no-cors', 
+                    cache: 'no-cache',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({code, name, qty, timestamp: new Date().toISOString()}) 
+                });
                 
-                // Toast & History
-                const t = document.getElementById('toast');
-                t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1500);
+                showToast("TERSIMPAN KE DATABASE");
 
-                historyData.unshift({name, qty, code, time: new Date().toLocaleTimeString('id-ID')});
-                if(historyData.length > 5) historyData.pop();
+                // Simpan ke riwayat lokal (ID unik untuk hapus satuan)
+                const entry = {
+                    id: Date.now(),
+                    name, 
+                    qty, 
+                    code, 
+                    time: new Date().toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})
+                };
+                
+                historyData.unshift(entry);
+                if(historyData.length > 20) historyData.pop(); // Simpan 20 riwayat terakhir
                 localStorage.setItem('scans', JSON.stringify(historyData));
                 
-                renderHistory(); closeModal();
-                document.getElementById('res-name').value = ''; document.getElementById('res-qty').value = '0';
-                setTimeout(() => isScanning = true, 1000);
-            } catch (e) { alert("GAGAL!"); btn.disabled = false; }
+                renderHistory(); 
+                closeModal();
+                
+                // Reset form
+                document.getElementById('res-name').value = ''; 
+                document.getElementById('res-qty').value = '1';
+            } catch (e) { 
+                alert("KONEKSI GAGAL!"); 
+                btn.disabled = false; 
+                btn.innerText = "COBA LAGI";
+            }
         }
 
-        function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; isScanning = true; document.getElementById('btn-save').disabled = false; document.getElementById('btn-save').innerText = "SIMPAN"; }
+        function deleteItem(id) {
+            if(confirm("Hapus item ini dari riwayat?")) {
+                historyData = historyData.filter(item => item.id !== id);
+                localStorage.setItem('scans', JSON.stringify(historyData));
+                renderHistory();
+            }
+        }
+
+        function clearAllHistory() {
+            if(confirm("Hapus semua riwayat di HP ini?")) {
+                historyData = [];
+                localStorage.removeItem('scans');
+                renderHistory();
+            }
+        }
+
+        function closeModal() { 
+            document.getElementById('modal-overlay').style.display = 'none'; 
+            isScanning = true; 
+            document.getElementById('btn-save').disabled = false; 
+            document.getElementById('btn-save').innerText = "SUBMIT DATA";
+            document.getElementById('status-text').innerText = "READY";
+            document.getElementById('status-text').style.color = "#00ff88";
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.add('show'); 
+            setTimeout(() => t.classList.remove('show'), 2000);
+        }
 
         function renderHistory() {
             document.getElementById('count-today').innerText = historyData.length;
-            document.getElementById('history-list').innerHTML = historyData.map(i => `
+            const list = document.getElementById('history-list');
+            
+            if (historyData.length === 0) {
+                list.innerHTML = `<div style="text-align:center; color:#555; margin-top:20px; font-size:12px;">Belum ada scan hari ini</div>`;
+                return;
+            }
+
+            list.innerHTML = historyData.map(i => `
                 <div class="history-item">
-                    <div class="history-info"><div>${i.name} (${i.qty})</div><span>${i.code}</span></div>
-                    <div style="font-size:10px; color:var(--neon-red);">${i.time}</div>
+                    <div class="history-info">
+                        <div>${i.name} <span style="color:var(--neon-red)">[${i.qty}]</span></div>
+                        <span>${i.code}</span>
+                    </div>
+                    <div style="display:flex; align-items:center;">
+                        <div style="font-size:10px; color:#555;">${i.time}</div>
+                        <button class="btn-delete" onclick="deleteItem(${i.id})">HAPUS</button>
+                    </div>
                 </div>`).join('');
         }
     </script>
